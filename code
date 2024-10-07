@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+
+import asyncio
+import sys
+import os
+import subprocess
+import logging
+
+
+
+async def aio_run(*args: str, **kw) -> subprocess.CompletedProcess:
+    proc = await asyncio.create_subprocess_exec(*args, **kw)
+    stdout, stderr = await proc.communicate()
+    stdout_res = None
+    stderr_res = None
+
+    if stdout is not None:
+        stdout_res = stdout.decode()
+    if stderr is not None:
+        stderr_res = stderr.decode()
+
+    assert proc.returncode is not None
+    return subprocess.CompletedProcess(args=args, stdout=stdout_res, stderr=stderr_res,
+                                       returncode=proc.returncode)
+
+class Flatpak:
+    def __init__(self) -> None:
+        pass
+
+    async def __call__(self, *args, **kw) -> subprocess.CompletedProcess:
+        return await aio_run('flatpak-spawn', '--host', 'flatpak', *args, **kw)
+
+async def main() -> None:
+    # Get the directory of the current script
+    script_directory = os.path.dirname(os.path.abspath(__file__))
+
+    # Set up logging to a file in the script's directory
+    log_file_path = os.path.join(script_directory, 'log.txt')
+    logging.basicConfig(filename=log_file_path, level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
+
+    unity_project = sys.argv[1]
+
+    logging.info(sys.argv)
+
+    launchjson = os.path.join(unity_project, '.vscode', 'launch.json')
+
+    launch_template = '''
+    {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Attach to Unity",
+                "type": "vstuc",
+                "request": "attach",
+                "endPoint": "127.0.0.1:port"
+            }
+        ]
+    }
+    '''
+
+    unity_pid = os.getppid()
+    unity_port = unity_pid % 1000 + 56000
+    logging.info(f"unity port {unity_port}")
+
+    launchconfig = launch_template.replace('port', str(unity_port))
+    logging.info(f"launch.json\n{launchconfig}")
+
+    directory = os.path.dirname(launchjson)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    with open(launchjson, 'w') as file:
+        file.write(launchconfig)
+
+    cmd = ['flatpak', 'run','com.visualstudio.code'] + sys.argv[1:]
+    logging.info(f'{cmd}')
+
+    flatpak = Flatpak()
+    await flatpak('run', 'com.visualstudio.code', *sys.argv[1:])
+
+if __name__ == '__main__':
+    asyncio.run(main())
